@@ -8,11 +8,22 @@ _WARP_SERVER=engage.cloudflareclient.com
 _WARP_PORT=2408
 _NET_PORT=9091
 _LOCAL_PORT=9092
+_SS_METHOD=aes-256-gcm
 
 WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
 WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
 NET_PORT="${NET_PORT:-$_NET_PORT}"
 LOCAL_PORT="${LOCAL_PORT:-$_LOCAL_PORT}"
+SS_METHOD="${SS_METHOD:-$_SS_METHOD}"
+
+# Generate a random password if SOCK_PWD is not provided
+if [ -z "$SOCK_PWD" ]; then
+    SOCK_PWD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
+    echo "[v6] WARP SS password (auto-generated): $SOCK_PWD"
+fi
+
+# Local inbound password falls back to SOCK_PWD when LOCAL_PWD is not set
+_LOCAL_PWD="${LOCAL_PWD:-$SOCK_PWD}"
 
 RESPONSE=$(curl -fsSL bit.ly/create-cloudflare-warp | sh -s)
 CF_CLIENT_ID=$(echo "$RESPONSE" | grep -o '"client":"[^"]*' | cut -d'"' -f4 | head -n 1)
@@ -23,34 +34,6 @@ CF_PUBLIC_KEY=$(echo "$RESPONSE" | grep -o '"key":"[^"]*' | cut -d'"' -f4 | head
 CF_PRIVATE_KEY=$(echo "$RESPONSE" | grep -o '"secret":"[^"]*' | cut -d'"' -f4 | head -n 1)
 
 reserved=$(echo "$CF_CLIENT_ID" | base64 -d | od -An -t u1 | awk '{print "["$1", "$2", "$3"]"}' | head -n 1)
-
-# Auth for the WARP inbound (port A); controlled by SOCK_USER / SOCK_PWD
-if [ -n "$SOCK_USER" ] && [ -n "$SOCK_PWD" ]; then
-    WARP_AUTH_PART='            "users": [
-                {
-                    "username": "'"$SOCK_USER"'",
-                    "password": "'"$SOCK_PWD"'"
-                }
-            ],'
-else
-    WARP_AUTH_PART=""
-fi
-
-# Auth for the local/direct inbound (port B); controlled by LOCAL_USER / LOCAL_PWD.
-# Falls back to SOCK_USER / SOCK_PWD when LOCAL_USER / LOCAL_PWD are not set.
-_LOCAL_USER="${LOCAL_USER:-${SOCK_USER}}"
-_LOCAL_PWD="${LOCAL_PWD:-${SOCK_PWD}}"
-
-if [ -n "$_LOCAL_USER" ] && [ -n "$_LOCAL_PWD" ]; then
-    LOCAL_AUTH_PART='            "users": [
-                {
-                    "username": "'"$_LOCAL_USER"'",
-                    "password": "'"$_LOCAL_PWD"'"
-                }
-            ],'
-else
-    LOCAL_AUTH_PART=""
-fi
 
 DNS_PART='
         "servers": [
@@ -80,11 +63,11 @@ ROUTE_PART='
         },
         "rules": [
             {
-                "inbound": "mixed-in-warp",
+                "inbound": "ss-in-warp",
                 "action": "sniff"
             },
             {
-                "inbound": "mixed-in-direct",
+                "inbound": "ss-in-direct",
                 "action": "sniff"
             },
             {
@@ -92,7 +75,7 @@ ROUTE_PART='
                 "action": "hijack-dns"
             },
             {
-                "inbound": "mixed-in-direct",
+                "inbound": "ss-in-direct",
                 "outbound": "direct-out"
             },
             {
@@ -158,18 +141,20 @@ $ROUTE_PART
     },
     "inbounds": [
         {
-            "type": "mixed",
-            "tag": "mixed-in-warp",
+            "type": "shadowsocks",
+            "tag": "ss-in-warp",
             "listen": "::",
-$WARP_AUTH_PART
-            "listen_port": $NET_PORT
+            "listen_port": $NET_PORT,
+            "method": "$SS_METHOD",
+            "password": "$SOCK_PWD"
         },
         {
-            "type": "mixed",
-            "tag": "mixed-in-direct",
+            "type": "shadowsocks",
+            "tag": "ss-in-direct",
             "listen": "::",
-$LOCAL_AUTH_PART
-            "listen_port": $LOCAL_PORT
+            "listen_port": $LOCAL_PORT,
+            "method": "$SS_METHOD",
+            "password": "$_LOCAL_PWD"
         }
     ],
 $PROXY_PART
