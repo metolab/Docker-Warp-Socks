@@ -33,5 +33,5 @@ jobs:
           context: "{{defaultContext}}:dev/v6"
           file: Dockerfile
           push: true
-          platforms: linux/arm, linux/arm64, linux/amd64, linux/ppc64le, linux/s390x, linux/riscv64
+          platforms: linux/amd64, linux/arm64
           tags: ${{ env.ghcr_tag }}:v6
