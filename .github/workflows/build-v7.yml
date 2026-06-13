@@ -1,4 +1,4 @@
-name: build-v6
+name: build-v7
 
 on:
   workflow_dispatch:
@@ -6,12 +6,12 @@ on:
     branches:
       - "master"
     paths:
-      - ".github/workflows/build-v6.yml"
-      - "dev/v6/Dockerfile"
-      - "dev/v6/entrypoint.sh"
+      - ".github/workflows/build-v7.yml"
+      - "dev/v7/Dockerfile"
+      - "dev/v7/entrypoint.sh"
 
 jobs:
-  build-v6:
+  build-v7:
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -30,8 +30,8 @@ jobs:
           echo "ghcr_tag=${ghcr_tag,,}" >> $GITHUB_ENV
       - uses: docker/build-push-action@v6
         with:
-          context: "{{defaultContext}}:dev/v6"
+          context: "{{defaultContext}}:dev/v7"
           file: Dockerfile
           push: true
           platforms: linux/amd64, linux/arm64
-          tags: ${{ env.ghcr_tag }}:v6
+          tags: ${{ env.ghcr_tag }}:v7

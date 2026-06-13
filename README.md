@@ -1,72 +1,69 @@
 # Docker-Warp-Socks
 
-[![CI Status](https://github.com/Mon-ius/Docker-Warp-Socks/workflows/build/badge.svg)](https://github.com/Mon-ius/Docker-Warp-Socks/actions?query=workflow:build)
-[![CI Status](https://github.com/Mon-ius/Docker-Warp-Socks/workflows/verify/badge.svg)](https://github.com/Mon-ius/Docker-Warp-Socks/actions?query=workflow:verify)
+[![CI Status](https://github.com/Mon-ius/Docker-Warp-Socks/workflows/build-v7/badge.svg)](https://github.com/Mon-ius/Docker-Warp-Socks/actions?query=workflow:build-v7)
 [![Docker Pulls](https://flat.badgen.net/docker/pulls/monius/docker-warp-socks?icon=docker)](https://hub.docker.com/r/monius/docker-warp-socks)
 [![Code Size](https://img.shields.io/github/languages/code-size/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Open Issues](https://img.shields.io/github/issues/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks/issues)
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Mon-ius/Docker-Warp-Socks&label=Visitors%20Totay&labelColor=%23808080&countColor=%23ffa31a&style=flat&labelStyle=upper)](https://visitorbadge.io/status?path=https://github.com/Mon-ius/Docker-Warp-Socks)
 
-> A lightweight Docker image, designed for easy connection to CloudFlare WARP, exposing `socks5` proxy all together.
+> A lightweight Docker image, designed for easy connection to CloudFlare WARP, exposing Shadowsocks, WARP Shadowsocks, SOCKS5, and HTTP proxy inbounds.
 
 Multi-platform: `linux/arm`, `linux/arm64`, `linux/amd64`,  `linux/ppc64le`, `linux/s390x` and `linux/riscv64`
 
 ---
 
-## Quick start v6 via GHCR
+## Quick start v7 via GHCR
 
 ```sh
 docker run --restart=always -itd \
-    --name warp_socks_v6 \
+    --name warp_socks_v7 \
     --network host \
-    -e SOCK_PWD=yourpassword \
-    ghcr.io/metolab/docker-warp-socks:v6
+    -e auth=user:password \
+    -e feature=ss=12300,warp=12301,socks=12302,http=12303 \
+    ghcr.io/metolab/docker-warp-socks:v7
 ```
 
 > [!Note]
-> Port `9091` (Shadowsocks) routes through **WARP** (IPv6-preferred). Port `9092` (Shadowsocks) routes through the **local machine** directly.
-> If `SOCK_PWD` is not set, a random password is printed to the container log on first start.
+> `auth` uses `user:password` for all enabled proxy features. Shadowsocks inbounds use only the password part.
+> If `auth` is not set, a random `warp:<password>` value is printed to the container log on first start.
 
-## V6 Features
+## V7 Features
 
-- Two independent **Shadowsocks** inbounds on separate ports (TCP + UDP):
-  - **Port A** (`NET_PORT`, default `9091`): exits via **Cloudflare WARP**, IPv6 preferred.
-  - **Port B** (`LOCAL_PORT`, default `9092`): exits via the **local machine** directly, bypassing WARP.
+- Configurable inbounds from one `feature` variable:
+  - `ss`: Shadowsocks inbound routed directly through the local machine.
+  - `warp`: Shadowsocks inbound routed through Cloudflare WARP, IPv6 preferred.
+  - `socks` or `socks5`: SOCKS5 inbound routed through Cloudflare WARP.
+  - `http`: HTTP proxy inbound routed through Cloudflare WARP.
 - `prefer_ipv6` DNS strategy ensures WARP uses the IPv6 path end-to-end.
 - WireGuard `allowed_ips` includes `::/0` for full IPv6 tunnelling.
-- Password-based authentication per port (`SOCK_PWD` for WARP, `LOCAL_PWD` for local).
-- Auto-generates a random `SOCK_PWD` and logs it if none is provided.
+- One shared `auth` value for all enabled features.
 - No `NET_ADMIN`, no `privileged`, latest `sing-box` binary, `amd64` + `arm64`.
 
-### V6 Environment Variables
+### V7 Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `NET_PORT` | `9091` | Shadowsocks port for WARP inbound |
-| `LOCAL_PORT` | `9092` | Shadowsocks port for local/direct inbound |
+| `auth` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
+| `feature` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
 | `SS_METHOD` | `aes-256-gcm` | Shadowsocks encryption method |
-| `SOCK_PWD` | _(auto-generated)_ | Password for the WARP inbound |
-| `LOCAL_PWD` | _(falls back to `SOCK_PWD`)_ | Password for the local inbound |
 | `WARP_SERVER` | `engage.cloudflareclient.com` | WARP WireGuard endpoint host |
 | `WARP_PORT` | `2408` | WARP WireGuard endpoint port |
 
-### V6 Docker Compose
+### V7 Docker Compose
 
 Save the following as `docker-compose.yml` and run `docker compose up -d`:
 
 ```yaml
 services:
-  warp-socks-v6:
-    image: ghcr.io/metolab/docker-warp-socks:v6
+  warp-socks-v7:
+    image: ghcr.io/metolab/docker-warp-socks:v7
     restart: always
     network_mode: host
     environment:
-      NET_PORT: "9091"
-      LOCAL_PORT: "9092"
+      auth: "user:password"
+      feature: "ss=12300,warp=12301,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
-      SOCK_PWD: "yourpassword"
-      LOCAL_PWD: "localpassword"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
       interval: 30s
@@ -495,10 +492,12 @@ curl --interface warp "https://www.cloudflare.com/cdn-cgi/trace"
 
 - CentOS/RedHat/Rocky Linux as Host, see https://github.com/uzairali001/docker-wireguard-rhel -->
 
-## Migrate to v6
+## Migrate to v7
 - The `v5` version will be kept and available at `monius/docker-warp-socks:v5`.
-- v6 adds a second direct/local inbound port and IPv6-preferred WARP routing on top of v5.
-- All v5 environment variables (`NET_PORT`, `SOCK_USER`, `SOCK_PWD`) continue to work in v6.
+- The `v6` version will be kept and available at `ghcr.io/metolab/docker-warp-socks:v6`, but is no longer maintained by the build workflow.
+- v7 replaces per-feature environment variables with `auth` and `feature`.
+- Use `auth=user:password`; `ss` and `warp` use only the password part for Shadowsocks.
+- Use `feature=ss=12300,warp=12301,socks=12302,http=12303` to choose enabled features and ports.
 
 ## Migrate to v5
 - The `v2` version will be kept and available at `monius/docker-warp-socks:v2`.
