@@ -10,8 +10,8 @@ services:
         image: ghcr.io/metolab/docker-warp-socks:v7
         network_mode: host
         environment:
-            auth: user:password
-            feature: ss=12300,warp=12301,socks=12302,http=12303
+            DW_AUTH: user:password
+            DW_FEATURE: ss=12300,warp=12301,socks=12302,http=12303
         healthcheck:
             test: ["CMD", "curl", "-f", "https://www.cloudflare.com/cdn-cgi/trace"]
             interval: 30s

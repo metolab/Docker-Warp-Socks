@@ -12,25 +12,24 @@ _FEATURE='ss=12300,warp=12301,socks=12302,http=12303'
 WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
 WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
 SS_METHOD="${SS_METHOD:-$_SS_METHOD}"
-feature="${feature:-${FEATURE:-$_FEATURE}}"
-auth="${auth:-${AUTH:-}}"
+DW_FEATURE="${DW_FEATURE:-$_FEATURE}"
 
 AUTH_USER=""
 AUTH_PASS=""
-if [ -n "$auth" ]; then
-    case "$auth" in
+if [ -n "$DW_AUTH" ]; then
+    case "$DW_AUTH" in
         *:*)
-            AUTH_USER=${auth%%:*}
-            AUTH_PASS=${auth#*:}
+            AUTH_USER=${DW_AUTH%%:*}
+            AUTH_PASS=${DW_AUTH#*:}
             ;;
         *)
-            echo "[v7] auth must use user:password format" >&2
+            echo "[v7] DW_AUTH must use user:password format" >&2
             exit 1
             ;;
     esac
 
     if [ -z "$AUTH_USER" ] || [ -z "$AUTH_PASS" ]; then
-        echo "[v7] auth user and password cannot be empty" >&2
+        echo "[v7] DW_AUTH user and password cannot be empty" >&2
         exit 1
     fi
 fi
@@ -41,20 +40,10 @@ if [ -z "$AUTH_PASS" ]; then
     echo "[v7] proxy auth (auto-generated): $AUTH_USER:$AUTH_PASS"
 fi
 
-if [ -z "$feature" ]; then
-    echo "[v7] feature cannot be empty" >&2
+if [ -z "$DW_FEATURE" ]; then
+    echo "[v7] DW_FEATURE cannot be empty" >&2
     exit 1
 fi
-
-RESPONSE=$(curl -fsSL bit.ly/create-cloudflare-warp | sh -s)
-CF_CLIENT_ID=$(echo "$RESPONSE" | grep -o '"client":"[^"]*' | cut -d'"' -f4 | head -n 1)
-CF_ADDR_V4=$(echo "$RESPONSE" | grep -o '"v4":"[^"]*' | cut -d'"' -f4 | tail -n 1)
-CF_ADDR_V6=$(echo "$RESPONSE" | grep -o '"v6":"[^"]*' | cut -d'"' -f4 | tail -n 1)
-
-CF_PUBLIC_KEY=$(echo "$RESPONSE" | grep -o '"key":"[^"]*' | cut -d'"' -f4 | head -n 1)
-CF_PRIVATE_KEY=$(echo "$RESPONSE" | grep -o '"secret":"[^"]*' | cut -d'"' -f4 | head -n 1)
-
-reserved=$(echo "$CF_CLIENT_ID" | base64 -d | od -An -t u1 | awk '{print "["$1", "$2", "$3"]"}' | head -n 1)
 
 INBOUNDS=$(mktemp)
 ROUTE_RULES=$(mktemp)
@@ -97,6 +86,8 @@ add_route_rule() {
     mv "$tmp" "$ROUTE_RULES"
 }
 
+NEEDS_WARP=0
+
 add_inbound() {
     name=$1
     port=$2
@@ -121,6 +112,7 @@ add_inbound() {
             add_route_rule "$tag" "direct-out"
             ;;
         warp)
+            NEEDS_WARP=1
             jq --arg tag "$tag" --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" \
                 '. += [{
                     "type": "shadowsocks",
@@ -153,7 +145,7 @@ add_inbound() {
                     }]' "$INBOUNDS" > "$tmp"
             fi
             mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "WARP"
+            add_route_rule "$tag" "direct-out"
             ;;
         http)
             if [ -n "$AUTH_USER" ]; then
@@ -175,7 +167,7 @@ add_inbound() {
                     }]' "$INBOUNDS" > "$tmp"
             fi
             mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "WARP"
+            add_route_rule "$tag" "direct-out"
             ;;
         *)
             echo "[v7] unsupported feature: $name" >&2
@@ -188,14 +180,14 @@ add_inbound() {
 seen_features=","
 old_ifs=$IFS
 IFS=,
-for item in $feature; do
+for item in $DW_FEATURE; do
     IFS=$old_ifs
     item=$(echo "$item" | tr -d '[:space:]')
     case "$item" in
         *=*) ;;
         *)
             echo "[v7] invalid feature item: $item" >&2
-            echo "[v7] expected format: feature='ss=12300,warp=12301,socks=12302,http=12303'" >&2
+            echo "[v7] expected format: DW_FEATURE='ss=12300,warp=12301,socks=12302,http=12303'" >&2
             exit 1
             ;;
     esac
@@ -239,9 +231,35 @@ if [ "$(jq 'length' "$INBOUNDS")" -eq 0 ]; then
     exit 1
 fi
 
+ROUTE_FINAL=direct-out
+CF_ADDR_V4=""
+CF_ADDR_V6=""
+CF_PRIVATE_KEY=""
+CF_PUBLIC_KEY=""
+reserved="[]"
+if [ "$NEEDS_WARP" -eq 1 ]; then
+    RESPONSE=$(curl -fsSL bit.ly/create-cloudflare-warp | sh -s)
+    CF_CLIENT_ID=$(echo "$RESPONSE" | grep -o '"client":"[^"]*' | cut -d'"' -f4 | head -n 1)
+    CF_ADDR_V4=$(echo "$RESPONSE" | grep -o '"v4":"[^"]*' | cut -d'"' -f4 | tail -n 1)
+    CF_ADDR_V6=$(echo "$RESPONSE" | grep -o '"v6":"[^"]*' | cut -d'"' -f4 | tail -n 1)
+
+    CF_PUBLIC_KEY=$(echo "$RESPONSE" | grep -o '"key":"[^"]*' | cut -d'"' -f4 | head -n 1)
+    CF_PRIVATE_KEY=$(echo "$RESPONSE" | grep -o '"secret":"[^"]*' | cut -d'"' -f4 | head -n 1)
+
+    if [ -z "$CF_CLIENT_ID" ] || [ -z "$CF_ADDR_V4" ] || [ -z "$CF_ADDR_V6" ] || [ -z "$CF_PUBLIC_KEY" ] || [ -z "$CF_PRIVATE_KEY" ]; then
+        echo "[v7] failed to parse WARP credentials" >&2
+        exit 1
+    fi
+
+    reserved=$(echo "$CF_CLIENT_ID" | base64 -d | od -An -t u1 | awk '{print "["$1", "$2", "$3"]"}' | head -n 1)
+    ROUTE_FINAL=WARP
+fi
+
 jq -n \
     --slurpfile inbounds "$INBOUNDS" \
     --slurpfile rules "$ROUTE_RULES" \
+    --arg routeFinal "$ROUTE_FINAL" \
+    --argjson needsWarp "$NEEDS_WARP" \
     --arg cfAddrV4 "$CF_ADDR_V4" \
     --arg cfAddrV6 "$CF_ADDR_V6" \
     --arg privateKey "$CF_PRIVATE_KEY" \
@@ -277,10 +295,10 @@ jq -n \
             },
             rules: $rules[0],
             auto_detect_interface: true,
-            final: "WARP"
+            final: $routeFinal
         },
         inbounds: $inbounds[0],
-        endpoints: [
+        endpoints: (if $needsWarp == 1 then [
             {
                 tag: "WARP",
                 type: "wireguard",
@@ -305,7 +323,7 @@ jq -n \
                 mtu: 1408,
                 udp_fragment: true
             }
-        ],
+        ] else [] end),
         outbounds: [
             {
                 tag: "direct-out",
@@ -318,7 +336,7 @@ jq -n \
 rm -f "$INBOUNDS" "$ROUTE_RULES"
 
 if [ ! -e "/usr/bin/rws-cli-v7" ]; then
-    echo "sing-box -c /etc/sing-box/config.json run" > /usr/bin/rws-cli-v7 && chmod +x /usr/bin/rws-cli-v7
+    printf '#!/bin/sh\nexec sing-box -c /etc/sing-box/config.json run\n' > /usr/bin/rws-cli-v7 && chmod +x /usr/bin/rws-cli-v7
 fi
 
 exec "$@"

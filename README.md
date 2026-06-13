@@ -19,34 +19,34 @@ Multi-platform: `linux/arm`, `linux/arm64`, `linux/amd64`,  `linux/ppc64le`, `li
 docker run --restart=always -itd \
     --name warp_socks_v7 \
     --network host \
-    -e auth=user:password \
-    -e feature=ss=12300,warp=12301,socks=12302,http=12303 \
+    -e DW_AUTH=user:password \
+    -e DW_FEATURE=ss=12300,warp=12301,socks=12302,http=12303 \
     ghcr.io/metolab/docker-warp-socks:v7
 ```
 
 > [!Note]
-> `auth` uses `user:password` for all enabled proxy features. Shadowsocks inbounds use only the password part.
-> If `auth` is not set, a random `warp:<password>` value is printed to the container log on first start.
+> `DW_AUTH` uses `user:password` for all enabled proxy features. Shadowsocks inbounds use only the password part.
+> If `DW_AUTH` is not set, a random `warp:<password>` value is printed to the container log on first start.
 
 ## V7 Features
 
-- Configurable inbounds from one `feature` variable:
+- Configurable inbounds from one `DW_FEATURE` variable:
   - `ss`: Shadowsocks inbound routed directly through the local machine.
   - `warp`: Shadowsocks inbound routed through Cloudflare WARP, IPv6 preferred.
-  - `socks` or `socks5`: SOCKS5 inbound routed through Cloudflare WARP.
-  - `http`: HTTP proxy inbound routed through Cloudflare WARP.
+  - `socks` or `socks5`: SOCKS5 inbound routed directly through the local machine.
+  - `http`: HTTP proxy inbound routed directly through the local machine.
 - `prefer_ipv6` DNS strategy ensures WARP uses the IPv6 path end-to-end.
 - WireGuard `allowed_ips` includes `::/0` for full IPv6 tunnelling.
-- One shared `auth` value for all enabled features.
+- One shared `DW_AUTH` value for all enabled features.
 - No `NET_ADMIN`, no `privileged`, latest `sing-box` binary, `amd64` + `arm64`.
 
 ### V7 Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `auth` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
-| `feature` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
-| `SS_METHOD` | `aes-256-gcm` | Shadowsocks encryption method |
+| `DW_AUTH` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
+| `DW_FEATURE` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
+| `SS_METHOD` | `aes-256-gcm` | Optional Shadowsocks encryption method |
 | `WARP_SERVER` | `engage.cloudflareclient.com` | WARP WireGuard endpoint host |
 | `WARP_PORT` | `2408` | WARP WireGuard endpoint port |
 
@@ -61,8 +61,8 @@ services:
     restart: always
     network_mode: host
     environment:
-      auth: "user:password"
-      feature: "ss=12300,warp=12301,socks=12302,http=12303"
+      DW_AUTH: "user:password"
+      DW_FEATURE: "ss=12300,warp=12301,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
@@ -495,9 +495,9 @@ curl --interface warp "https://www.cloudflare.com/cdn-cgi/trace"
 ## Migrate to v7
 - The `v5` version will be kept and available at `monius/docker-warp-socks:v5`.
 - The `v6` version will be kept and available at `ghcr.io/metolab/docker-warp-socks:v6`, but is no longer maintained by the build workflow.
-- v7 replaces per-feature environment variables with `auth` and `feature`.
-- Use `auth=user:password`; `ss` and `warp` use only the password part for Shadowsocks.
-- Use `feature=ss=12300,warp=12301,socks=12302,http=12303` to choose enabled features and ports.
+- v7 replaces per-feature environment variables with `DW_AUTH` and `DW_FEATURE`.
+- Use `DW_AUTH=user:password`; `ss` and `warp` use only the password part for Shadowsocks.
+- Use `DW_FEATURE=ss=12300,warp=12301,socks=12302,http=12303` to choose enabled features and ports.
 
 ## Migrate to v5
 - The `v2` version will be kept and available at `monius/docker-warp-socks:v2`.
