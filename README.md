@@ -35,7 +35,7 @@ docker run --restart=always -itd \
   - `warp`: Shadowsocks inbound routed through Cloudflare WARP, IPv6 preferred.
   - `socks` or `socks5`: SOCKS5 inbound routed directly through the local machine.
   - `http`: HTTP proxy inbound routed directly through the local machine.
-- `prefer_ipv6` DNS strategy ensures WARP uses the IPv6 path end-to-end.
+- DNS strategy is configurable with `DNS_STRATEGY`; the default is `prefer_ipv4` to avoid unstable direct IPv6 paths.
 - WireGuard `allowed_ips` includes `::/0` for full IPv6 tunnelling.
 - One shared `DW_AUTH` value for all enabled features.
 - No `NET_ADMIN`, no `privileged`, latest `sing-box` binary, `amd64` + `arm64`.
@@ -47,6 +47,7 @@ docker run --restart=always -itd \
 | `DW_AUTH` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
 | `DW_FEATURE` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
 | `SS_METHOD` | `aes-256-gcm` | Optional Shadowsocks encryption method |
+| `DNS_STRATEGY` | `prefer_ipv4` | sing-box DNS strategy; set `prefer_ipv6` if your server has reliable IPv6 and you want IPv6-preferred WARP egress |
 | `WARP_SERVER` | `engage.cloudflareclient.com` | WARP WireGuard endpoint host |
 | `WARP_PORT` | `2408` | WARP WireGuard endpoint port |
 
@@ -64,6 +65,7 @@ services:
       DW_AUTH: "user:password"
       DW_FEATURE: "ss=12300,warp=12301,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
+      DNS_STRATEGY: "prefer_ipv4"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
       interval: 30s

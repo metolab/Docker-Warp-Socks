@@ -8,11 +8,13 @@ _WARP_SERVER=engage.cloudflareclient.com
 _WARP_PORT=2408
 _SS_METHOD=aes-256-gcm
 _FEATURE='ss=12300,warp=12301,socks=12302,http=12303'
+_DNS_STRATEGY=prefer_ipv4
 
 WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
 WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
 SS_METHOD="${SS_METHOD:-$_SS_METHOD}"
 DW_FEATURE="${DW_FEATURE:-$_FEATURE}"
+DNS_STRATEGY="${DNS_STRATEGY:-$_DNS_STRATEGY}"
 
 AUTH_USER=""
 AUTH_PASS=""
@@ -47,7 +49,11 @@ fi
 
 INBOUNDS=$(mktemp)
 ROUTE_RULES=$(mktemp)
+SNIFF_RULES=$(mktemp)
+OUTBOUND_RULES=$(mktemp)
 printf '[]' > "$INBOUNDS"
+printf '[]' > "$SNIFF_RULES"
+printf '[]' > "$OUTBOUND_RULES"
 cat > "$ROUTE_RULES" <<'EOF'
 [
   {
@@ -80,10 +86,15 @@ add_route_rule() {
     tag=$1
     outbound=$2
     tmp=$(mktemp)
+    jq --arg tag "$tag" '. += [{"inbound": $tag, "action": "sniff"}]' \
+        "$SNIFF_RULES" > "$tmp"
+    mv "$tmp" "$SNIFF_RULES"
+
+    tmp=$(mktemp)
     jq --arg tag "$tag" --arg outbound "$outbound" \
-        '.[:0] + [{"inbound": $tag, "action": "sniff"}] + [{"inbound": $tag, "outbound": $outbound}] + .[0:]' \
-        "$ROUTE_RULES" > "$tmp"
-    mv "$tmp" "$ROUTE_RULES"
+        '. += [{"inbound": $tag, "outbound": $outbound}]' \
+        "$OUTBOUND_RULES" > "$tmp"
+    mv "$tmp" "$OUTBOUND_RULES"
 }
 
 NEEDS_WARP=0
@@ -258,7 +269,10 @@ fi
 jq -n \
     --slurpfile inbounds "$INBOUNDS" \
     --slurpfile rules "$ROUTE_RULES" \
+    --slurpfile sniffRules "$SNIFF_RULES" \
+    --slurpfile outboundRules "$OUTBOUND_RULES" \
     --arg routeFinal "$ROUTE_FINAL" \
+    --arg dnsStrategy "$DNS_STRATEGY" \
     --argjson needsWarp "$NEEDS_WARP" \
     --arg cfAddrV4 "$CF_ADDR_V4" \
     --arg cfAddrV6 "$CF_ADDR_V6" \
@@ -284,7 +298,7 @@ jq -n \
                     detour: "direct-out"
                 }
             ],
-            strategy: "prefer_ipv6",
+            strategy: $dnsStrategy,
             final: "remote",
             reverse_mapping: true
         },
@@ -293,7 +307,7 @@ jq -n \
                 server: "local",
                 rewrite_ttl: 60
             },
-            rules: $rules[0],
+            rules: ($sniffRules[0] + $rules[0] + $outboundRules[0]),
             auto_detect_interface: true,
             final: $routeFinal
         },
@@ -333,7 +347,7 @@ jq -n \
         ]
     }' | tee /etc/sing-box/config.json
 
-rm -f "$INBOUNDS" "$ROUTE_RULES"
+rm -f "$INBOUNDS" "$ROUTE_RULES" "$SNIFF_RULES" "$OUTBOUND_RULES"
 
 if [ ! -e "/usr/bin/rws-cli-v7" ]; then
     printf '#!/bin/sh\nexec sing-box -c /etc/sing-box/config.json run\n' > /usr/bin/rws-cli-v7 && chmod +x /usr/bin/rws-cli-v7
