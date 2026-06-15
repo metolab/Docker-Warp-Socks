@@ -8,7 +8,7 @@ _WARP_SERVER=engage.cloudflareclient.com
 _WARP_PORT=2408
 _SS_METHOD=aes-256-gcm
 _FEATURE='ss=12300,warp=12301,socks=12302,http=12303'
-_DNS_STRATEGY=prefer_ipv4
+_DNS_STRATEGY=ipv4_only
 
 WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
 WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
