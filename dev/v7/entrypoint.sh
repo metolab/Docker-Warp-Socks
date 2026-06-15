@@ -174,9 +174,38 @@ jq '
 
 rm -f "$LISTENERS"
 
+start_cf_probe() {
+    (
+        set +e
+        url="https://cp.cloudflare.com/cdn-cgi/trace"
+        interval=10
+
+        while true; do
+            body=$(mktemp)
+            metrics=$(curl -sS -L --max-time 15 -o "$body" -w '%{http_code} %{time_total}' "$url" 2>&1)
+            rc=$?
+            status=${metrics%% *}
+            elapsed=${metrics#* }
+            timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+            if [ "$rc" -eq 0 ]; then
+                echo "[mihomo-probe] $timestamp status=$status elapsed=${elapsed}s url=$url"
+                sed 's/^/[mihomo-probe] body: /' "$body"
+            else
+                echo "[mihomo-probe] $timestamp status=ERR elapsed=NA url=$url error=$metrics"
+            fi
+
+            rm -f "$body"
+            sleep "$interval"
+        done
+    ) &
+}
+
 if [ ! -e "/usr/bin/rws-cli-mihomo" ]; then
     printf '#!/bin/sh\nexec mihomo -d /etc/mihomo -f /etc/mihomo/config.yaml\n' > /usr/bin/rws-cli-mihomo
     chmod +x /usr/bin/rws-cli-mihomo
 fi
+
+start_cf_probe
 
 exec "$@"
