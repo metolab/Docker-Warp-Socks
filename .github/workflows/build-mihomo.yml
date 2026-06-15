@@ -1,15 +1,16 @@
-name: build-v7
+name: build-mihomo
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - "master"
+      - "mihomo"
 
 jobs:
-  build-v7:
+  build-mihomo:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v6
@@ -29,7 +30,7 @@ jobs:
           context: "{{defaultContext}}:dev/v7"
           file: Dockerfile
           push: true
-          platforms: linux/amd64, linux/arm64
+          platforms: linux/amd64
           tags: |
-            ${{ env.ghcr_tag }}:v7
+            ${{ env.ghcr_tag }}:mihomo
             ${{ env.ghcr_tag }}:commit-${{ github.sha }}

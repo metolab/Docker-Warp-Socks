@@ -1,71 +1,64 @@
 # Docker-Warp-Socks
 
-[![CI Status](https://github.com/Mon-ius/Docker-Warp-Socks/workflows/build-v7/badge.svg)](https://github.com/Mon-ius/Docker-Warp-Socks/actions?query=workflow:build-v7)
+[![CI Status](https://github.com/Mon-ius/Docker-Warp-Socks/workflows/build-mihomo/badge.svg)](https://github.com/Mon-ius/Docker-Warp-Socks/actions?query=workflow:build-mihomo)
 [![Docker Pulls](https://flat.badgen.net/docker/pulls/monius/docker-warp-socks?icon=docker)](https://hub.docker.com/r/monius/docker-warp-socks)
 [![Code Size](https://img.shields.io/github/languages/code-size/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Open Issues](https://img.shields.io/github/issues/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks/issues)
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Mon-ius/Docker-Warp-Socks&label=Visitors%20Totay&labelColor=%23808080&countColor=%23ffa31a&style=flat&labelStyle=upper)](https://visitorbadge.io/status?path=https://github.com/Mon-ius/Docker-Warp-Socks)
 
-> A lightweight Docker image, designed for easy connection to CloudFlare WARP, exposing Shadowsocks, WARP Shadowsocks, SOCKS5, and HTTP proxy inbounds.
+> A lightweight mihomo-based Docker image exposing Shadowsocks, SOCKS5, and HTTP proxy inbounds.
 
-Multi-platform: `linux/arm`, `linux/arm64`, `linux/amd64`,  `linux/ppc64le`, `linux/s390x` and `linux/riscv64`
+Platform: `linux/amd64`
 
 ---
 
-## Quick start v7 via GHCR
+## Quick start mihomo via GHCR
 
 ```sh
 docker run --restart=always -itd \
-    --name warp_socks_v7 \
+    --name warp_socks_mihomo \
     --network host \
     -e DW_AUTH=user:password \
-    -e DW_FEATURE=ss=12300,warp=12301,socks=12302,http=12303 \
-    ghcr.io/metolab/docker-warp-socks:v7
+    -e DW_FEATURE=ss=12300,socks=12302,http=12303 \
+    ghcr.io/metolab/docker-warp-socks:mihomo
 ```
 
 > [!Note]
 > `DW_AUTH` uses `user:password` for all enabled proxy features. Shadowsocks inbounds use only the password part.
 > If `DW_AUTH` is not set, a random `warp:<password>` value is printed to the container log on first start.
 
-## V7 Features
+## Mihomo Features
 
 - Configurable inbounds from one `DW_FEATURE` variable:
   - `ss`: Shadowsocks inbound routed directly through the local machine.
-  - `warp`: Shadowsocks inbound routed through Cloudflare WARP, IPv6 preferred.
   - `socks` or `socks5`: SOCKS5 inbound routed directly through the local machine.
   - `http`: HTTP proxy inbound routed directly through the local machine.
-- DNS strategy is configurable with `DNS_STRATEGY`; the default is `ipv4_only` to avoid unstable or unavailable direct IPv6 paths.
-- WireGuard `allowed_ips` includes `::/0` for full IPv6 tunnelling.
 - One shared `DW_AUTH` value for all enabled features.
-- No `NET_ADMIN`, no `privileged`, latest `sing-box` binary, `amd64` + `arm64`.
+- No WARP, no `NET_ADMIN`, no `privileged`, latest mihomo binary, `amd64` only.
 
-### V7 Environment Variables
+### Mihomo Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `DW_AUTH` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
-| `DW_FEATURE` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
+| `DW_FEATURE` | `ss=12300,socks=12302,http=12303` | Enabled features and listen ports |
 | `SS_METHOD` | `aes-256-gcm` | Optional Shadowsocks encryption method |
-| `DNS_STRATEGY` | `ipv4_only` | sing-box DNS strategy; set `prefer_ipv6` if your server has reliable IPv6 and you want IPv6-preferred WARP egress |
-| `WARP_SERVER` | `engage.cloudflareclient.com` | WARP WireGuard endpoint host |
-| `WARP_PORT` | `2408` | WARP WireGuard endpoint port |
 
-### V7 Docker Compose
+### Mihomo Docker Compose
 
 Save the following as `docker-compose.yml` and run `docker compose up -d`:
 
 ```yaml
 services:
-  warp-socks-v7:
-    image: ghcr.io/metolab/docker-warp-socks:v7
+  warp-socks-mihomo:
+    image: ghcr.io/metolab/docker-warp-socks:mihomo
     restart: always
     network_mode: host
     environment:
       DW_AUTH: "user:password"
-      DW_FEATURE: "ss=12300,warp=12301,socks=12302,http=12303"
+      DW_FEATURE: "ss=12300,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
-      DNS_STRATEGY: "ipv4_only"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
       interval: 30s

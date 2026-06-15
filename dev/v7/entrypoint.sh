@@ -4,17 +4,11 @@ set -e
 
 sleep 3
 
-_WARP_SERVER=engage.cloudflareclient.com
-_WARP_PORT=2408
 _SS_METHOD=aes-256-gcm
-_FEATURE='ss=12300,warp=12301,socks=12302,http=12303'
-_DNS_STRATEGY=ipv4_only
+_FEATURE='ss=12300,socks=12302,http=12303'
 
-WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
-WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
 SS_METHOD="${SS_METHOD:-$_SS_METHOD}"
 DW_FEATURE="${DW_FEATURE:-$_FEATURE}"
-DNS_STRATEGY="${DNS_STRATEGY:-$_DNS_STRATEGY}"
 
 AUTH_USER=""
 AUTH_PASS=""
@@ -25,13 +19,13 @@ if [ -n "$DW_AUTH" ]; then
             AUTH_PASS=${DW_AUTH#*:}
             ;;
         *)
-            echo "[v7] DW_AUTH must use user:password format" >&2
+            echo "[mihomo] DW_AUTH must use user:password format" >&2
             exit 1
             ;;
     esac
 
     if [ -z "$AUTH_USER" ] || [ -z "$AUTH_PASS" ]; then
-        echo "[v7] DW_AUTH user and password cannot be empty" >&2
+        echo "[mihomo] DW_AUTH user and password cannot be empty" >&2
         exit 1
     fi
 fi
@@ -39,156 +33,71 @@ fi
 if [ -z "$AUTH_PASS" ]; then
     AUTH_USER=warp
     AUTH_PASS=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
-    echo "[v7] proxy auth (auto-generated): $AUTH_USER:$AUTH_PASS"
+    echo "[mihomo] proxy auth (auto-generated): $AUTH_USER:$AUTH_PASS"
 fi
 
 if [ -z "$DW_FEATURE" ]; then
-    echo "[v7] DW_FEATURE cannot be empty" >&2
+    echo "[mihomo] DW_FEATURE cannot be empty" >&2
     exit 1
 fi
 
-INBOUNDS=$(mktemp)
-ROUTE_RULES=$(mktemp)
-SNIFF_RULES=$(mktemp)
-OUTBOUND_RULES=$(mktemp)
-printf '[]' > "$INBOUNDS"
-printf '[]' > "$SNIFF_RULES"
-printf '[]' > "$OUTBOUND_RULES"
-cat > "$ROUTE_RULES" <<'EOF'
-[
-  {
-    "protocol": "dns",
-    "action": "hijack-dns"
-  },
-  {
-    "ip_is_private": true,
-    "outbound": "direct-out"
-  },
-  {
-    "ip_cidr": [
-      "0.0.0.0/8",
-      "10.0.0.0/8",
-      "127.0.0.0/8",
-      "169.254.0.0/16",
-      "172.16.0.0/12",
-      "192.168.0.0/16",
-      "224.0.0.0/4",
-      "240.0.0.0/4",
-      "52.80.0.0/16",
-      "112.95.0.0/16"
-    ],
-    "outbound": "direct-out"
-  }
-]
-EOF
+LISTENERS=$(mktemp)
+printf '[]' > "$LISTENERS"
 
-add_route_rule() {
-    tag=$1
-    outbound=$2
-    tmp=$(mktemp)
-    jq --arg tag "$tag" '. += [{"inbound": $tag, "action": "sniff"}]' \
-        "$SNIFF_RULES" > "$tmp"
-    mv "$tmp" "$SNIFF_RULES"
-
-    tmp=$(mktemp)
-    jq --arg tag "$tag" --arg outbound "$outbound" \
-        '. += [{"inbound": $tag, "outbound": $outbound}]' \
-        "$OUTBOUND_RULES" > "$tmp"
-    mv "$tmp" "$OUTBOUND_RULES"
-}
-
-NEEDS_WARP=0
-
-add_inbound() {
+add_listener() {
     name=$1
     port=$2
-    if [ "$name" = "socks" ]; then
-        name=socks5
-    fi
-    tag="${name}-in"
     tmp=$(mktemp)
 
     case "$name" in
         ss)
-            jq --arg tag "$tag" --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" \
+            jq --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" \
                 '. += [{
+                    "name": "ss-in",
                     "type": "shadowsocks",
-                    "tag": $tag,
                     "listen": "::",
-                    "listen_port": $port,
-                    "method": $method,
-                    "password": $password
-                }]' "$INBOUNDS" > "$tmp"
-            mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "direct-out"
-            ;;
-        warp)
-            NEEDS_WARP=1
-            jq --arg tag "$tag" --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" \
-                '. += [{
-                    "type": "shadowsocks",
-                    "tag": $tag,
-                    "listen": "::",
-                    "listen_port": $port,
-                    "method": $method,
-                    "password": $password
-                }]' "$INBOUNDS" > "$tmp"
-            mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "WARP"
+                    "port": $port,
+                    "cipher": $method,
+                    "password": $password,
+                    "udp": true,
+                    "proxy": "DIRECT"
+                }]' "$LISTENERS" > "$tmp"
             ;;
         socks5)
-            if [ -n "$AUTH_USER" ]; then
-                jq --arg tag "$tag" --argjson port "$port" --arg user "$AUTH_USER" --arg password "$AUTH_PASS" \
-                    '. += [{
-                        "type": "socks",
-                        "tag": $tag,
-                        "listen": "::",
-                        "listen_port": $port,
-                        "users": [{"username": $user, "password": $password}]
-                    }]' "$INBOUNDS" > "$tmp"
-            else
-                jq --arg tag "$tag" --argjson port "$port" \
-                    '. += [{
-                        "type": "socks",
-                        "tag": $tag,
-                        "listen": "::",
-                        "listen_port": $port
-                    }]' "$INBOUNDS" > "$tmp"
-            fi
-            mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "direct-out"
+            jq --argjson port "$port" --arg user "$AUTH_USER" --arg password "$AUTH_PASS" \
+                '. += [{
+                    "name": "socks5-in",
+                    "type": "socks",
+                    "listen": "::",
+                    "port": $port,
+                    "users": [{"username": $user, "password": $password}],
+                    "udp": true,
+                    "proxy": "DIRECT"
+                }]' "$LISTENERS" > "$tmp"
             ;;
         http)
-            if [ -n "$AUTH_USER" ]; then
-                jq --arg tag "$tag" --argjson port "$port" --arg user "$AUTH_USER" --arg password "$AUTH_PASS" \
-                    '. += [{
-                        "type": "http",
-                        "tag": $tag,
-                        "listen": "::",
-                        "listen_port": $port,
-                        "users": [{"username": $user, "password": $password}]
-                    }]' "$INBOUNDS" > "$tmp"
-            else
-                jq --arg tag "$tag" --argjson port "$port" \
-                    '. += [{
-                        "type": "http",
-                        "tag": $tag,
-                        "listen": "::",
-                        "listen_port": $port
-                    }]' "$INBOUNDS" > "$tmp"
-            fi
-            mv "$tmp" "$INBOUNDS"
-            add_route_rule "$tag" "direct-out"
+            jq --argjson port "$port" --arg user "$AUTH_USER" --arg password "$AUTH_PASS" \
+                '. += [{
+                    "name": "http-in",
+                    "type": "http",
+                    "listen": "::",
+                    "port": $port,
+                    "users": [{"username": $user, "password": $password}],
+                    "proxy": "DIRECT"
+                }]' "$LISTENERS" > "$tmp"
             ;;
         *)
-            echo "[v7] unsupported feature: $name" >&2
-            echo "[v7] supported features: ss, warp, socks5, http" >&2
+            echo "[mihomo] unsupported feature: $name" >&2
+            echo "[mihomo] supported features: ss, socks5, http" >&2
             exit 1
             ;;
     esac
+
+    mv "$tmp" "$LISTENERS"
 }
 
 seen_features=","
+seen_ports=","
 old_ifs=$IFS
 IFS=,
 for item in $DW_FEATURE; do
@@ -197,8 +106,8 @@ for item in $DW_FEATURE; do
     case "$item" in
         *=*) ;;
         *)
-            echo "[v7] invalid feature item: $item" >&2
-            echo "[v7] expected format: DW_FEATURE='ss=12300,warp=12301,socks=12302,http=12303'" >&2
+            echo "[mihomo] invalid feature item: $item" >&2
+            echo "[mihomo] expected format: DW_FEATURE='ss=12300,socks=12302,http=12303'" >&2
             exit 1
             ;;
     esac
@@ -210,147 +119,64 @@ for item in $DW_FEATURE; do
     port=${item#*=}
     case "$port" in
         ''|*[!0-9]*)
-            echo "[v7] invalid port for $name: $port" >&2
+            echo "[mihomo] invalid port for $name: $port" >&2
             exit 1
             ;;
     esac
     if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        echo "[v7] port out of range for $name: $port" >&2
+        echo "[mihomo] port out of range for $name: $port" >&2
         exit 1
     fi
     case "$seen_features" in
         *,"$name",*)
-            echo "[v7] duplicate feature: $name" >&2
+            echo "[mihomo] duplicate feature: $name" >&2
             exit 1
             ;;
     esac
-    case "${seen_ports:-,}" in
+    case "$seen_ports" in
         *,"$port",*)
-            echo "[v7] duplicate port: $port" >&2
+            echo "[mihomo] duplicate port: $port" >&2
             exit 1
             ;;
     esac
     seen_features="${seen_features}${name},"
-    seen_ports="${seen_ports:-,}${port},"
-    add_inbound "$name" "$port"
+    seen_ports="${seen_ports}${port},"
+    add_listener "$name" "$port"
     IFS=,
 done
 IFS=$old_ifs
 
-if [ "$(jq 'length' "$INBOUNDS")" -eq 0 ]; then
-    echo "[v7] no enabled feature found" >&2
+if [ "$(jq 'length' "$LISTENERS")" -eq 0 ]; then
+    echo "[mihomo] no enabled feature found" >&2
     exit 1
 fi
 
-ROUTE_FINAL=direct-out
-CF_ADDR_V4=""
-CF_ADDR_V6=""
-CF_PRIVATE_KEY=""
-CF_PUBLIC_KEY=""
-reserved="[]"
-if [ "$NEEDS_WARP" -eq 1 ]; then
-    RESPONSE=$(curl -fsSL bit.ly/create-cloudflare-warp | sh -s)
-    CF_CLIENT_ID=$(echo "$RESPONSE" | grep -o '"client":"[^"]*' | cut -d'"' -f4 | head -n 1)
-    CF_ADDR_V4=$(echo "$RESPONSE" | grep -o '"v4":"[^"]*' | cut -d'"' -f4 | tail -n 1)
-    CF_ADDR_V6=$(echo "$RESPONSE" | grep -o '"v6":"[^"]*' | cut -d'"' -f4 | tail -n 1)
-
-    CF_PUBLIC_KEY=$(echo "$RESPONSE" | grep -o '"key":"[^"]*' | cut -d'"' -f4 | head -n 1)
-    CF_PRIVATE_KEY=$(echo "$RESPONSE" | grep -o '"secret":"[^"]*' | cut -d'"' -f4 | head -n 1)
-
-    if [ -z "$CF_CLIENT_ID" ] || [ -z "$CF_ADDR_V4" ] || [ -z "$CF_ADDR_V6" ] || [ -z "$CF_PUBLIC_KEY" ] || [ -z "$CF_PRIVATE_KEY" ]; then
-        echo "[v7] failed to parse WARP credentials" >&2
-        exit 1
-    fi
-
-    reserved=$(echo "$CF_CLIENT_ID" | base64 -d | od -An -t u1 | awk '{print "["$1", "$2", "$3"]"}' | head -n 1)
-    ROUTE_FINAL=WARP
-fi
-
-jq -n \
-    --slurpfile inbounds "$INBOUNDS" \
-    --slurpfile rules "$ROUTE_RULES" \
-    --slurpfile sniffRules "$SNIFF_RULES" \
-    --slurpfile outboundRules "$OUTBOUND_RULES" \
-    --arg routeFinal "$ROUTE_FINAL" \
-    --arg dnsStrategy "$DNS_STRATEGY" \
-    --argjson needsWarp "$NEEDS_WARP" \
-    --arg cfAddrV4 "$CF_ADDR_V4" \
-    --arg cfAddrV6 "$CF_ADDR_V6" \
-    --arg privateKey "$CF_PRIVATE_KEY" \
-    --arg warpServer "$WARP_SERVER" \
-    --argjson warpPort "$WARP_PORT" \
-    --arg publicKey "$CF_PUBLIC_KEY" \
-    --argjson reserved "$reserved" \
-    '{
+jq '
+    {
+        "mixed-port": 0,
+        "allow-lan": true,
+        "bind-address": "*",
+        mode: "rule",
+        "log-level": "info",
+        ipv6: false,
         dns: {
-            servers: [
-                {
-                    tag: "remote",
-                    type: "tls",
-                    server: "1.1.1.1",
-                    domain_resolver: "local",
-                    detour: "direct-out"
-                },
-                {
-                    tag: "local",
-                    type: "udp",
-                    server: "8.8.8.8",
-                    detour: "direct-out"
-                }
-            ],
-            strategy: $dnsStrategy,
-            final: "remote",
-            reverse_mapping: true
+            enable: true,
+            ipv6: false,
+            "enhanced-mode": "normal",
+            nameserver: ["1.1.1.1", "8.8.8.8"]
         },
-        route: {
-            default_domain_resolver: {
-                server: "local",
-                rewrite_ttl: 60
-            },
-            rules: ($sniffRules[0] + $rules[0] + $outboundRules[0]),
-            auto_detect_interface: true,
-            final: $routeFinal
-        },
-        inbounds: $inbounds[0],
-        endpoints: (if $needsWarp == 1 then [
-            {
-                tag: "WARP",
-                type: "wireguard",
-                address: [
-                    "\($cfAddrV4)/32",
-                    "\($cfAddrV6)/128"
-                ],
-                private_key: $privateKey,
-                peers: [
-                    {
-                        address: $warpServer,
-                        port: $warpPort,
-                        public_key: $publicKey,
-                        allowed_ips: [
-                            "0.0.0.0/0",
-                            "::/0"
-                        ],
-                        persistent_keepalive_interval: 30,
-                        reserved: $reserved
-                    }
-                ],
-                mtu: 1408,
-                udp_fragment: true
-            }
-        ] else [] end),
-        outbounds: [
-            {
-                tag: "direct-out",
-                type: "direct",
-                udp_fragment: true
-            }
-        ]
-    }' | tee /etc/sing-box/config.json
+        proxies: [],
+        "proxy-groups": [],
+        listeners: .,
+        rules: ["MATCH,DIRECT"]
+    }
+' "$LISTENERS" > /etc/mihomo/config.yaml
 
-rm -f "$INBOUNDS" "$ROUTE_RULES" "$SNIFF_RULES" "$OUTBOUND_RULES"
+rm -f "$LISTENERS"
 
-if [ ! -e "/usr/bin/rws-cli-v7" ]; then
-    printf '#!/bin/sh\nexec sing-box -c /etc/sing-box/config.json run\n' > /usr/bin/rws-cli-v7 && chmod +x /usr/bin/rws-cli-v7
+if [ ! -e "/usr/bin/rws-cli-mihomo" ]; then
+    printf '#!/bin/sh\nexec mihomo -d /etc/mihomo -f /etc/mihomo/config.yaml\n' > /usr/bin/rws-cli-mihomo
+    chmod +x /usr/bin/rws-cli-mihomo
 fi
 
 exec "$@"
