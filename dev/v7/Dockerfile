@@ -12,7 +12,7 @@ LABEL maintainer="M0nius <m0niusplus@gmail.com>" \
     org.opencontainers.image.base.name="docker.io/monius/docker-warp-socks"
 
 RUN apk update && apk upgrade \
-    && apk add --no-cache curl gzip jq \
+    && apk add --no-cache curl gzip jq openssl \
     && rm -rf /var/cache/apk/*
 
 RUN set -e; \

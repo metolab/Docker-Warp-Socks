@@ -5,10 +5,14 @@ set -e
 sleep 3
 
 _SS_METHOD=aes-256-gcm
-_FEATURE='ss=12300,socks=12302,http=12303'
+_FEATURE='ss=12300,warp=12301,socks=12302,http=12303'
+_WARP_SERVER=engage.cloudflareclient.com
+_WARP_PORT=2408
 
 SS_METHOD="${SS_METHOD:-$_SS_METHOD}"
 DW_FEATURE="${DW_FEATURE:-$_FEATURE}"
+WARP_SERVER="${WARP_SERVER:-$_WARP_SERVER}"
+WARP_PORT="${WARP_PORT:-$_WARP_PORT}"
 
 AUTH_USER=""
 AUTH_PASS=""
@@ -42,25 +46,34 @@ if [ -z "$DW_FEATURE" ]; then
 fi
 
 LISTENERS=$(mktemp)
+PROXIES=$(mktemp)
 printf '[]' > "$LISTENERS"
+printf '[]' > "$PROXIES"
 
 add_listener() {
     name=$1
     port=$2
+    proxy=DIRECT
     tmp=$(mktemp)
 
     case "$name" in
-        ss)
-            jq --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" \
+        ss|warp)
+            if [ "$name" = "warp" ]; then
+                listener_name=ss-in-warp
+                proxy=WARP
+            else
+                listener_name=ss-in
+            fi
+            jq --arg name "$listener_name" --argjson port "$port" --arg method "$SS_METHOD" --arg password "$AUTH_PASS" --arg proxy "$proxy" \
                 '. += [{
-                    "name": "ss-in",
+                    "name": $name,
                     "type": "shadowsocks",
                     "listen": "::",
                     "port": $port,
                     "cipher": $method,
                     "password": $password,
                     "udp": true,
-                    "proxy": "DIRECT"
+                    "proxy": $proxy
                 }]' "$LISTENERS" > "$tmp"
             ;;
         socks5)
@@ -88,7 +101,7 @@ add_listener() {
             ;;
         *)
             echo "[mihomo] unsupported feature: $name" >&2
-            echo "[mihomo] supported features: ss, socks5, http" >&2
+            echo "[mihomo] supported features: ss, warp, socks5, http" >&2
             exit 1
             ;;
     esac
@@ -107,7 +120,7 @@ for item in $DW_FEATURE; do
         *=*) ;;
         *)
             echo "[mihomo] invalid feature item: $item" >&2
-            echo "[mihomo] expected format: DW_FEATURE='ss=12300,socks=12302,http=12303'" >&2
+            echo "[mihomo] expected format: DW_FEATURE='ss=12300,warp=12301,socks=12302,http=12303'" >&2
             exit 1
             ;;
     esac
@@ -151,7 +164,64 @@ if [ "$(jq 'length' "$LISTENERS")" -eq 0 ]; then
     exit 1
 fi
 
-jq '
+case "$WARP_PORT" in
+    ''|*[!0-9]*)
+        echo "[mihomo] invalid WARP_PORT: $WARP_PORT" >&2
+        exit 1
+        ;;
+esac
+if [ "$WARP_PORT" -lt 1 ] || [ "$WARP_PORT" -gt 65535 ]; then
+    echo "[mihomo] WARP_PORT out of range: $WARP_PORT" >&2
+    exit 1
+fi
+
+case "$seen_features" in
+    *,warp,*)
+        RESPONSE=$(curl -fsSL bit.ly/create-cloudflare-warp | sh -s)
+        CF_CLIENT_ID=$(echo "$RESPONSE" | grep -o '"client":"[^"]*' | cut -d'"' -f4 | head -n 1)
+        CF_ADDR_V4=$(echo "$RESPONSE" | grep -o '"v4":"[^"]*' | cut -d'"' -f4 | tail -n 1)
+        CF_ADDR_V6=$(echo "$RESPONSE" | grep -o '"v6":"[^"]*' | cut -d'"' -f4 | tail -n 1)
+        CF_PUBLIC_KEY=$(echo "$RESPONSE" | grep -o '"key":"[^"]*' | cut -d'"' -f4 | head -n 1)
+        CF_PRIVATE_KEY=$(echo "$RESPONSE" | grep -o '"secret":"[^"]*' | cut -d'"' -f4 | head -n 1)
+
+        if [ -z "$CF_CLIENT_ID" ] || [ -z "$CF_ADDR_V4" ] || [ -z "$CF_ADDR_V6" ] || [ -z "$CF_PUBLIC_KEY" ] || [ -z "$CF_PRIVATE_KEY" ]; then
+            echo "[mihomo] failed to create Cloudflare WARP profile" >&2
+            exit 1
+        fi
+
+        reserved=$(echo "$CF_CLIENT_ID" | base64 -d | od -An -t u1 | awk '{print "["$1", "$2", "$3"]"}' | head -n 1)
+        if [ -z "$reserved" ]; then
+            echo "[mihomo] failed to decode Cloudflare WARP reserved bytes" >&2
+            exit 1
+        fi
+
+        tmp=$(mktemp)
+        jq --arg server "$WARP_SERVER" \
+            --argjson port "$WARP_PORT" \
+            --arg private_key "$CF_PRIVATE_KEY" \
+            --arg ip "$CF_ADDR_V4" \
+            --arg ipv6 "$CF_ADDR_V6" \
+            --arg public_key "$CF_PUBLIC_KEY" \
+            --argjson reserved "$reserved" \
+            '. += [{
+                name: "WARP",
+                type: "wireguard",
+                "private-key": $private_key,
+                server: $server,
+                port: $port,
+                ip: $ip,
+                ipv6: $ipv6,
+                "public-key": $public_key,
+                "allowed-ips": ["0.0.0.0/0", "::/0"],
+                reserved: $reserved,
+                udp: true,
+                mtu: 1408
+            }]' "$PROXIES" > "$tmp"
+        mv "$tmp" "$PROXIES"
+        ;;
+esac
+
+jq -n --slurpfile listeners "$LISTENERS" --slurpfile proxies "$PROXIES" '
     {
         "mixed-port": 0,
         "allow-lan": true,
@@ -165,14 +235,14 @@ jq '
             "enhanced-mode": "normal",
             nameserver: ["1.1.1.1", "8.8.8.8"]
         },
-        proxies: [],
+        proxies: $proxies[0],
         "proxy-groups": [],
-        listeners: .,
+        listeners: $listeners[0],
         rules: ["MATCH,DIRECT"]
     }
-' "$LISTENERS" > /etc/mihomo/config.yaml
+' > /etc/mihomo/config.yaml
 
-rm -f "$LISTENERS"
+rm -f "$LISTENERS" "$PROXIES"
 
 start_cf_probe() {
     (

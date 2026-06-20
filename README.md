@@ -7,7 +7,7 @@
 [![Open Issues](https://img.shields.io/github/issues/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks/issues)
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Mon-ius/Docker-Warp-Socks&label=Visitors%20Totay&labelColor=%23808080&countColor=%23ffa31a&style=flat&labelStyle=upper)](https://visitorbadge.io/status?path=https://github.com/Mon-ius/Docker-Warp-Socks)
 
-> A lightweight mihomo-based Docker image exposing Shadowsocks, SOCKS5, and HTTP proxy inbounds.
+> A lightweight mihomo-based Docker image exposing direct and WARP-backed proxy inbounds.
 
 Platform: `linux/amd64`
 
@@ -20,7 +20,7 @@ docker run --restart=always -itd \
     --name warp_socks_mihomo \
     --network host \
     -e DW_AUTH=user:password \
-    -e DW_FEATURE=ss=12300,socks=12302,http=12303 \
+    -e DW_FEATURE=ss=12300,warp=12301,socks=12302,http=12303 \
     ghcr.io/metolab/docker-warp-socks:mihomo
 ```
 
@@ -32,18 +32,21 @@ docker run --restart=always -itd \
 
 - Configurable inbounds from one `DW_FEATURE` variable:
   - `ss`: Shadowsocks inbound routed directly through the local machine.
+  - `warp`: Shadowsocks inbound routed through a Cloudflare WARP WireGuard outbound.
   - `socks` or `socks5`: SOCKS5 inbound routed directly through the local machine.
   - `http`: HTTP proxy inbound routed directly through the local machine.
 - One shared `DW_AUTH` value for all enabled features.
-- No WARP, no `NET_ADMIN`, no `privileged`, latest mihomo binary, `amd64` only.
+- WARP support does not require `NET_ADMIN` or `privileged`; latest mihomo binary, `amd64` only.
 
 ### Mihomo Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `DW_AUTH` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
-| `DW_FEATURE` | `ss=12300,socks=12302,http=12303` | Enabled features and listen ports |
+| `DW_FEATURE` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
 | `SS_METHOD` | `aes-256-gcm` | Optional Shadowsocks encryption method |
+| `WARP_SERVER` | `engage.cloudflareclient.com` | Optional Cloudflare WARP endpoint host |
+| `WARP_PORT` | `2408` | Optional Cloudflare WARP endpoint port |
 
 ### Mihomo Docker Compose
 
@@ -57,7 +60,7 @@ services:
     network_mode: host
     environment:
       DW_AUTH: "user:password"
-      DW_FEATURE: "ss=12300,socks=12302,http=12303"
+      DW_FEATURE: "ss=12300,warp=12301,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
