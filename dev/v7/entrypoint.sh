@@ -178,8 +178,27 @@ fi
 
 LISTENERS=$(mktemp)
 PROXIES=$(mktemp)
+PROXY_GROUPS=$(mktemp)
 printf '[]' > "$LISTENERS"
 printf '[]' > "$PROXIES"
+printf '[]' > "$PROXY_GROUPS"
+
+add_keepalive_group() {
+    name=$1
+    proxy=$2
+    tmp=$(mktemp)
+
+    jq --arg name "$name" --arg proxy "$proxy" \
+        '. += [{
+            "name": $name,
+            "type": "url-test",
+            "proxies": [$proxy],
+            "url": "https://cp.cloudflare.com/cdn-cgi/trace",
+            "interval": 30,
+            "lazy": false
+        }]' "$PROXY_GROUPS" > "$tmp"
+    mv "$tmp" "$PROXY_GROUPS"
+}
 
 add_listener() {
     name=$1
@@ -192,11 +211,11 @@ add_listener() {
             case "$name" in
                 warp)
                     listener_name=ss-in-warp
-                    proxy=WARP
+                    proxy=WARP_KEEPALIVE
                     ;;
                 masque)
                     listener_name=ss-in-masque
-                    proxy=MASQUE
+                    proxy=MASQUE_KEEPALIVE
                     ;;
                 *)
                     listener_name=ss-in
@@ -360,6 +379,7 @@ case "$seen_features" in
                 mtu: 1408
             }]' "$PROXIES" > "$tmp"
         mv "$tmp" "$PROXIES"
+        add_keepalive_group WARP_KEEPALIVE WARP
         ;;
 esac
 
@@ -407,9 +427,11 @@ case "$seen_features" in
                 ipv6: $ipv6,
                 "ip-version": $ip_version,
                 udp: true,
-                mtu: 1280
+                mtu: 1280,
+                "congestion-controller": "bbr"
             }]' "$PROXIES" > "$tmp"
         mv "$tmp" "$PROXIES"
+        add_keepalive_group MASQUE_KEEPALIVE MASQUE
         rm -rf "$MASQUE_CONFIG_DIR" /tmp/usque-register.log
         ;;
 esac
@@ -417,6 +439,7 @@ esac
 jq -n \
     --slurpfile listeners "$LISTENERS" \
     --slurpfile proxies "$PROXIES" \
+    --slurpfile proxy_groups "$PROXY_GROUPS" \
     --arg local_ip_version "$LOCAL_TARGET_IP_VERSION" '
     {
         "mixed-port": 0,
@@ -424,9 +447,13 @@ jq -n \
         "bind-address": "*",
         mode: "rule",
         "log-level": "info",
+        "tcp-concurrent": true,
+        "keep-alive-interval": 15,
+        "keep-alive-idle": 15,
         ipv6: true,
         dns: {
             enable: true,
+            "cache-algorithm": "arc",
             ipv6: true,
             "enhanced-mode": "normal",
             nameserver: ["1.1.1.1", "8.8.8.8"]
@@ -437,46 +464,17 @@ jq -n \
             udp: true,
             "ip-version": $local_ip_version
         }] + $proxies[0]),
-        "proxy-groups": [],
+        "proxy-groups": $proxy_groups[0],
         listeners: $listeners[0],
         rules: ["MATCH,LOCAL"]
     }
 ' > /etc/mihomo/config.yaml
 
-rm -f "$LISTENERS" "$PROXIES"
-
-start_cf_probe() {
-    (
-        set +e
-        url="https://cp.cloudflare.com/cdn-cgi/trace"
-        interval=10
-
-        while true; do
-            body=$(mktemp)
-            metrics=$(curl -sS -L --max-time 15 -o "$body" -w '%{http_code} %{time_total}' "$url" 2>&1)
-            rc=$?
-            status=${metrics%% *}
-            elapsed=${metrics#* }
-            timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-
-            if [ "$rc" -eq 0 ]; then
-                echo "[mihomo-probe] $timestamp status=$status elapsed=${elapsed}s url=$url"
-                sed 's/^/[mihomo-probe] body: /' "$body"
-            else
-                echo "[mihomo-probe] $timestamp status=ERR elapsed=NA url=$url error=$metrics"
-            fi
-
-            rm -f "$body"
-            sleep "$interval"
-        done
-    ) &
-}
+rm -f "$LISTENERS" "$PROXIES" "$PROXY_GROUPS"
 
 if [ ! -e "/usr/bin/rws-cli-mihomo" ]; then
     printf '#!/bin/sh\nexec mihomo -d /etc/mihomo -f /etc/mihomo/config.yaml\n' > /usr/bin/rws-cli-mihomo
     chmod +x /usr/bin/rws-cli-mihomo
 fi
-
-start_cf_probe
 
 exec "$@"

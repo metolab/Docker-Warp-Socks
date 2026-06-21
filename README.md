@@ -38,6 +38,9 @@ docker run --restart=always -itd \
   - `http`: HTTP proxy inbound routed directly through the local machine.
 - Local target, WARP endpoint, WARP target, MASQUE endpoint, and MASQUE target IP family policies can be controlled independently.
 - WARP and MASQUE keep dual-stack tunnel addresses by default.
+- WARP and MASQUE inbounds are routed through Mihomo `url-test` groups that request `https://cp.cloudflare.com/cdn-cgi/trace` every 30 seconds to keep the selected path warm.
+- Generated Mihomo config enables TCP concurrent dialing, TCP keep-alive, and ARC DNS caching.
+- MASQUE uses Mihomo's `bbr` congestion controller.
 - One shared `DW_AUTH` value for all enabled features.
 - WARP support does not require `NET_ADMIN` or `privileged`; latest mihomo binary, `amd64` only.
 
