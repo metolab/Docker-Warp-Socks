@@ -7,7 +7,7 @@
 [![Open Issues](https://img.shields.io/github/issues/Mon-ius/Docker-Warp-Socks)](https://github.com/Mon-ius/Docker-Warp-Socks/issues)
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=https://github.com/Mon-ius/Docker-Warp-Socks&label=Visitors%20Totay&labelColor=%23808080&countColor=%23ffa31a&style=flat&labelStyle=upper)](https://visitorbadge.io/status?path=https://github.com/Mon-ius/Docker-Warp-Socks)
 
-> A lightweight mihomo-based Docker image exposing direct and WARP-backed proxy inbounds.
+> A lightweight mihomo-based Docker image exposing direct, WARP, and MASQUE-backed proxy inbounds.
 
 Platform: `linux/amd64`
 
@@ -20,7 +20,7 @@ docker run --restart=always -itd \
     --name warp_socks_mihomo \
     --network host \
     -e DW_AUTH=user:password \
-    -e DW_FEATURE=ss=12300,warp=12301,socks=12302,http=12303 \
+    -e DW_FEATURE=ss=12300,warp=12301,masque=12304,socks=12302,http=12303 \
     ghcr.io/metolab/docker-warp-socks:mihomo
 ```
 
@@ -33,8 +33,11 @@ docker run --restart=always -itd \
 - Configurable inbounds from one `DW_FEATURE` variable:
   - `ss`: Shadowsocks inbound routed directly through the local machine.
   - `warp`: Shadowsocks inbound routed through a Cloudflare WARP WireGuard outbound.
+  - `masque`: Shadowsocks inbound routed through a Cloudflare WARP MASQUE outbound.
   - `socks` or `socks5`: SOCKS5 inbound routed directly through the local machine.
   - `http`: HTTP proxy inbound routed directly through the local machine.
+- Local target, WARP endpoint, WARP target, MASQUE endpoint, and MASQUE target IP family policies can be controlled independently.
+- WARP and MASQUE keep dual-stack tunnel addresses by default.
 - One shared `DW_AUTH` value for all enabled features.
 - WARP support does not require `NET_ADMIN` or `privileged`; latest mihomo binary, `amd64` only.
 
@@ -43,10 +46,17 @@ docker run --restart=always -itd \
 | Variable | Default | Description |
 |---|---|---|
 | `DW_AUTH` | _(auto-generated `warp:<password>`)_ | Shared `user:password`; Shadowsocks uses only the password |
-| `DW_FEATURE` | `ss=12300,warp=12301,socks=12302,http=12303` | Enabled features and listen ports |
+| `DW_FEATURE` | `ss=12300,warp=12301,masque=12304,socks=12302,http=12303` | Enabled features and listen ports |
 | `SS_METHOD` | `aes-256-gcm` | Optional Shadowsocks encryption method |
 | `WARP_SERVER` | `engage.cloudflareclient.com` | Optional Cloudflare WARP endpoint host |
 | `WARP_PORT` | `2408` | Optional Cloudflare WARP endpoint port |
+| `LOCAL_TARGET_IP_VERSION` | `prefer-v4` | Local/direct target IP policy: `prefer-v4`, `prefer-v6`, `only-v4`, `only-v6`, or `dual` |
+| `WARP_ENDPOINT_IP_VERSION` | `prefer-v4` | IP policy used to connect to the Cloudflare WARP WireGuard endpoint |
+| `WARP_TARGET_IP_VERSION` | `prefer-v6` | IP policy used inside WARP when connecting from Cloudflare to target websites |
+| `MASQUE_ENDPOINT_IP_VERSION` | `prefer-v4` | IP policy used to connect to the Cloudflare MASQUE endpoint |
+| `MASQUE_TARGET_IP_VERSION` | `prefer-v6` | IP policy used inside MASQUE when connecting from Cloudflare to target websites |
+
+The older `LOCAL_IP_VERSION`, `WARP_IP_VERSION`, and `MASQUE_IP_VERSION` names are still accepted as compatibility aliases. Prefer the split variables above for new deployments.
 
 ### Mihomo Docker Compose
 
@@ -60,8 +70,13 @@ services:
     network_mode: host
     environment:
       DW_AUTH: "user:password"
-      DW_FEATURE: "ss=12300,warp=12301,socks=12302,http=12303"
+      DW_FEATURE: "ss=12300,warp=12301,masque=12304,socks=12302,http=12303"
       SS_METHOD: "aes-256-gcm"
+      LOCAL_TARGET_IP_VERSION: "prefer-v4"
+      WARP_ENDPOINT_IP_VERSION: "prefer-v4"
+      WARP_TARGET_IP_VERSION: "prefer-v6"
+      MASQUE_ENDPOINT_IP_VERSION: "prefer-v4"
+      MASQUE_TARGET_IP_VERSION: "prefer-v6"
     healthcheck:
       test: ["CMD", "curl", "-fsSL", "https://www.cloudflare.com/cdn-cgi/trace"]
       interval: 30s
